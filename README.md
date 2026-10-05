@@ -25,10 +25,11 @@ python -m robosteer_api.task_index \
 export ROBOOSTEER_CORE_ROOT=/srv/robosteer/evaluator
 export ROBOOSTEER_DATASET_ROOT=/srv/robosteer/dataset
 export ROBOOSTEER_TASK_INDEX=/srv/robosteer/task-index.sqlite3
+python -m robosteer_api.doctor
 python -m robosteer_api.app
 ```
 
-The index builder reads task JSON once, verifies CSV reference paths, and stores only the task labels and reference locations needed by this service. Rebuild it when the dataset changes. It omits Order/Times records whose paired text task is absent or malformed. The server binds to `127.0.0.1:8080` by default; set `ROBOOSTEER_BIND` and `ROBOOSTEER_PORT` if needed. `ROBOOSTEER_MAX_CONCURRENT_EVALUATIONS` defaults to 2 and excess concurrent requests receive HTTP 429.
+The index builder reads task JSON once, verifies CSV reference paths, and stores only the task labels and reference locations needed by this service. Rebuild it when the dataset changes. It omits Order/Times records whose paired text task is absent or malformed. The doctor command checks that every constraint has indexed tasks, the evaluator imports, G1 CPU kinematics load, and video tools exist. The server binds to `127.0.0.1:8080` by default; set `ROBOOSTEER_BIND` and `ROBOOSTEER_PORT` if needed. `ROBOOSTEER_MAX_CONCURRENT_EVALUATIONS` defaults to 2 and excess concurrent requests receive HTTP 429.
 
 Put an HTTPS reverse proxy in front of the process and set upload, concurrency, and request rate limits there. The API allows browser requests from `https://robosteer.github.io` only; direct clients can call it without an `Origin` header. This is an open evaluation endpoint, so protect the server from excessive uploads and requests.
 

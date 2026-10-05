@@ -28,13 +28,14 @@ PROVIDER_ROOTS = {
 
 
 def validate_base_url(value: str) -> str:
+    raw = value.strip().rstrip("/")
     try:
-        parsed = urlsplit(value.strip().rstrip("/"))
+        parsed = urlsplit(raw)
         port = parsed.port
     except ValueError as exc:
         raise EvaluationFailure("INVALID_BASE_URL", "Base URL is invalid.") from exc
     if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
-            or parsed.query or parsed.fragment or port not in (None, 443)):
+            or "?" in raw or "#" in raw or port not in (None, 443)):
         raise EvaluationFailure("INVALID_BASE_URL", "Base URL must be a public HTTPS API root on port 443.")
     if parsed.path.casefold().endswith(("/chat/completions", "/responses", "/messages", ":generatecontent")):
         raise EvaluationFailure("INVALID_BASE_URL", "Enter the API root, not a request endpoint.")
@@ -47,7 +48,7 @@ def validate_base_url(value: str) -> str:
     else:
         if not address.is_global:
             raise EvaluationFailure("INVALID_BASE_URL", "Base URL must resolve to a public address.")
-    return value.strip().rstrip("/")
+    return raw
 
 
 class PublicResolver(AbstractResolver):
@@ -105,9 +106,12 @@ def _request_spec(provider: str, root: str, model: str, key: str, prompt: str, f
     if provider in {"openai", "custom_openai_compatible"}:
         content = [{"type": "text", "text": prompt}]
         content.extend({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{frame}"}} for frame in frames)
-        return (root + "/chat/completions", {"Authorization": f"Bearer {key}"},
-                {"model": model, "messages": [{"role": "user", "content": content}],
-                 "temperature": 0, "max_tokens": 256})
+        body = {"model": model, "messages": [{"role": "user", "content": content}]}
+        if provider == "openai":
+            body["max_completion_tokens"] = 256
+        else:
+            body.update({"temperature": 0, "max_tokens": 256})
+        return root + "/chat/completions", {"Authorization": f"Bearer {key}"}, body
     if provider == "anthropic":
         content = [{"type": "text", "text": prompt}]
         content.extend({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": frame}} for frame in frames)
@@ -155,8 +159,8 @@ async def evaluate_video(settings: Settings, task: dict, video: Path, *, provide
         raise EvaluationFailure("INVALID_PROVIDER", "Choose a supported VLM provider.")
     if not model_name.strip() or len(model_name) > 200 or any(ord(c) < 32 for c in model_name):
         raise EvaluationFailure("INVALID_MODEL", "Enter a valid model ID.")
-    if not api_key.strip():
-        raise EvaluationFailure("INVALID_API_KEY", "Enter an API Key.")
+    if (not api_key.strip() or any(ord(char) <= 32 or ord(char) == 127 for char in api_key.strip())):
+        raise EvaluationFailure("INVALID_API_KEY", "Enter a valid API Key.")
     if provider == "custom_openai_compatible" and not base_url.strip():
         raise EvaluationFailure("INVALID_BASE_URL", "Enter a Base URL for the custom provider.")
     root = validate_base_url(base_url) if base_url.strip() else PROVIDER_ROOTS[provider]

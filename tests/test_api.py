@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+import socket
 import sys
 import tempfile
 from unittest.mock import patch
@@ -16,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 from robosteer_api.app import create_app
 from robosteer_api.config import Settings
 from robosteer_api.task_index import build_index, lookup
-from robosteer_api.vlm import validate_base_url
+from robosteer_api.vlm import PublicResolver, _request_spec, validate_base_url
 from robosteer_api.metrics import EvaluationFailure
 
 
@@ -65,11 +66,11 @@ def make_dataset(root: Path) -> tuple[Settings, str, str]:
     return settings, task_id, "L2_order_text_base_1_p0"
 
 
-def csv_form(task_id: str, *, include_quat: bool = True) -> FormData:
+def csv_form(task_id: str, *, include_quat: bool = True, joint_filename: str = "joint_pos.csv") -> FormData:
     data = FormData()
     data.add_field("task_id", task_id)
     data.add_field("constraint", "speed")
-    data.add_field("joint_pos_file", csv(3, 29), filename="joint_pos.csv", content_type="text/csv")
+    data.add_field("joint_pos_file", csv(3, 29), filename=joint_filename, content_type="text/csv")
     data.add_field("body_pos_file", csv(3, 3), filename="body_pos.csv", content_type="text/csv")
     if include_quat:
         data.add_field("body_quat_file", csv(3, 4), filename="body_quat.csv", content_type="text/csv")
@@ -86,6 +87,10 @@ def test_index_and_csv_api() -> None:
             assert payload["result"]["satisfied"] is True
             assert payload["result"]["score"] == 1.0
             assert response.headers["Access-Control-Allow-Origin"] == settings.allowed_origin
+
+            response = await client.post("/api/level2/evaluate/csv",
+                                         data=csv_form(task_id, joint_filename="model-output.csv"))
+            assert response.status == 200
 
             response = await client.post("/api/level2/evaluate/csv", data=csv_form(task_id, include_quat=False))
             assert response.status == 400
@@ -126,9 +131,33 @@ def test_order_api_uses_task_label_and_model_json() -> None:
         asyncio.run(run(settings, task_id))
 
 
+def test_times_api_uses_paired_text_label() -> None:
+    async def run(settings: Settings):
+        task_id = "L2_times_audio_base_1_3x"
+        form = FormData()
+        for key, value in (("task_id", task_id), ("constraint", "times"), ("provider", "anthropic"),
+                           ("model_name", "test-model"), ("api_key", "test-key")):
+            form.add_field(key, value)
+        form.add_field("file", b"mock-video", filename="motion.webm", content_type="video/webm")
+        async def fake_call(*args, **kwargs):
+            return '{"visible": true, "count": 3}'
+        with patch("robosteer_api.vlm.extract_frames", return_value=["a", "b"]), \
+             patch("robosteer_api.vlm._call_model", side_effect=fake_call):
+            async with TestClient(TestServer(create_app(settings))) as client:
+                response = await client.post("/api/level2/evaluate/video", data=form)
+                payload = await response.json()
+                assert response.status == 200, payload
+                assert payload["result"]["score"] == 1.0
+
+    with tempfile.TemporaryDirectory() as directory:
+        settings, _, _ = make_dataset(Path(directory))
+        asyncio.run(run(settings))
+
+
 def test_base_url_rejects_private_targets() -> None:
     for url in ("http://example.com/v1", "https://127.0.0.1/v1", "https://example.com:8080/v1",
-                "https://user:pass@example.com/v1", "https://example.com/v1/chat/completions"):
+                "https://user:pass@example.com/v1", "https://example.com/v1/chat/completions",
+                "https://example.com/v1?", "https://example.com/v1#"):
         try:
             validate_base_url(url)
         except EvaluationFailure:
@@ -136,3 +165,33 @@ def test_base_url_rejects_private_targets() -> None:
         else:
             raise AssertionError(f"accepted unsafe base URL: {url}")
     assert validate_base_url("https://example.com/v1/") == "https://example.com/v1"
+
+
+def test_provider_requests_keep_keys_out_of_urls() -> None:
+    for provider, suffix, header in (
+        ("openai", "/chat/completions", "Authorization"),
+        ("custom_openai_compatible", "/chat/completions", "Authorization"),
+        ("anthropic", "/messages", "x-api-key"),
+        ("google", "/models/example:generateContent", "x-goog-api-key"),
+    ):
+        url, headers, body = _request_spec(provider, "https://example.com/v1", "example", "test-key", "prompt", ["frame"])
+        assert url.endswith(suffix)
+        assert "test-key" not in url
+        assert "test-key" in headers[header]
+        assert "frame" in json.dumps(body)
+        if provider == "openai":
+            assert body["max_completion_tokens"] == 256
+
+
+def test_resolver_rejects_private_dns_results() -> None:
+    async def run():
+        loop = asyncio.get_running_loop()
+        result = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]
+        with patch.object(loop, "getaddrinfo", return_value=result):
+            try:
+                await PublicResolver().resolve("example.test", 443)
+            except EvaluationFailure:
+                pass
+            else:
+                raise AssertionError("private DNS address was accepted")
+    asyncio.run(run())

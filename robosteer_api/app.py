@@ -6,7 +6,7 @@ import asyncio
 from pathlib import Path
 import tempfile
 
-from aiohttp import web
+from aiohttp import ClientPayloadError, web
 
 from .config import Settings
 from .metrics import EvaluationFailure, evaluate_csv
@@ -44,6 +44,8 @@ async def api_errors(request: web.Request, handler):
         response = error_response(error)
     except web.HTTPRequestEntityTooLarge:
         response = error_response(EvaluationFailure("UPLOAD_TOO_LARGE", "Upload is too large.", 413))
+    except web.HTTPException as error:
+        response = error_response(EvaluationFailure("HTTP_ERROR", "Invalid API route or method.", error.status))
     except Exception:
         response = error_response(EvaluationFailure("INTERNAL_ERROR", "Evaluation service failed.", 500))
     if request.headers.get("Origin") == request.app["settings"].allowed_origin:
@@ -105,7 +107,7 @@ async def parse_form(request: web.Request, directory: Path, kind: str) -> tuple[
             if not size:
                 raise EvaluationFailure("INVALID_FILE", "Uploaded file is empty.")
             files[name] = target
-    except (ValueError, OSError) as exc:
+    except (AssertionError, ClientPayloadError, ValueError, OSError, web.HTTPBadRequest) as exc:
         raise EvaluationFailure("INVALID_MULTIPART", "Could not read the upload.") from exc
     required_text = expected_text - {"base_url"}
     if not required_text <= text.keys() or not all(text[name].strip() for name in required_text):

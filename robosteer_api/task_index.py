@@ -21,7 +21,7 @@ def normalize_family(value: str) -> str:
 
 
 def lookup(index_path: Path, task_id: str) -> dict | None:
-    connection = sqlite3.connect(f"file:{index_path}?mode=ro", uri=True)
+    connection = sqlite3.connect(index_path.resolve().as_uri() + "?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
         row = connection.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
