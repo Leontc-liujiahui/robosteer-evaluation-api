@@ -21,7 +21,7 @@ from robosteer_api.vlm import PublicResolver, _request_spec, validate_base_url
 from robosteer_api.metrics import EvaluationFailure
 
 
-CORE_ROOT = ROOT.parent
+CORE_ROOT = ROOT
 
 
 def csv(rows: int, columns: int) -> bytes:

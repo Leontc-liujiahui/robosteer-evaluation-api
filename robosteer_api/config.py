@@ -30,7 +30,9 @@ class Settings:
 
         settings = cls(
             dataset_root=required("ROBOOSTEER_DATASET_ROOT"),
-            core_root=required("ROBOOSTEER_CORE_ROOT"),
+            core_root=Path(
+                os.environ.get("ROBOOSTEER_CORE_ROOT", Path(__file__).resolve().parents[1])
+            ).expanduser().resolve(),
             task_index=required("ROBOOSTEER_TASK_INDEX"),
             prediction_fps=float(os.environ.get("ROBOOSTEER_PREDICTION_FPS", "50")),
             groundtruth_fps=float(os.environ.get("ROBOOSTEER_GROUNDTRUTH_FPS", "50")),

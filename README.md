@@ -4,25 +4,41 @@ Python HTTP adapter for the Level 2 form on [robosteer.github.io](https://robost
 
 ## Runtime inputs
 
-This repository contains the Web API, not the full benchmark or model weights. The server also needs:
+This repository backs up the Web API, the evaluator source used by its seven
+Level 2 IR₂ constraints, and the OMG G1 CPU kinematics source and assets. It
+does not contain the benchmark dataset or model weights. The server also needs:
 
-1. A local checkout of the existing RoboSteer evaluator (`scripts/level2/ir.py`, `scripts/evaluation/...`) and its Python dependencies. Point `ROBOOSTEER_CORE_ROOT` at its root.
-2. The authoritative benchmark dataset with `Tasks/Level2` and referenced `Data/...` motion folders. Point `ROBOOSTEER_DATASET_ROOT` at its root. Keep this data outside the Git repository.
-3. The OMG G1 kinematics source and asset used by the existing Body Restrain evaluator. The evaluator locates it through its existing `omg_paths.py` logic. Without this dependency, that constraint returns a service error.
-4. `ffmpeg` and `ffprobe` on `PATH` for video requests. Order and Times call the user's chosen external vision model, so the CPU server needs network access to that model's HTTPS API.
+1. The authoritative benchmark dataset with `Tasks/Level2` and referenced
+   `Data/...` motion folders. Point `ROBOOSTEER_DATASET_ROOT` at its root.
+   Keep this data outside the Git repository.
+2. `ffmpeg` and `ffprobe` on `PATH` for video requests. Order and Times call
+   the user's chosen external vision model, so the CPU server needs network
+   access to that model's HTTPS API.
+
+The bundled evaluator is under `scripts/`. The OMG G1 source and its JSON/URDF
+assets are under `vendor/OMG/`, with its original MIT license. The API uses
+these copies by default. `ROBOOSTEER_CORE_ROOT` may still point to a separate
+evaluator checkout when explicitly needed.
 
 The existing evaluator's `load_qpos_36` checks CSV widths, finite values, root quaternion validity, and at least two common frames. Scoring calls the existing `compute_ir2` implementation with CPU selected. It does not copy or alter the benchmark formulas.
 
 ## Set up
 
-Use Python 3.10 or later. Install this repository's `requirements.txt` and the original evaluator's CPU-compatible dependencies in the same environment. No API credentials belong in this repository.
+Use Python 3.10. Install the CPU PyTorch wheel first, then this repository's
+`requirements.txt` in the same environment. The requirements cover the API
+and bundled IR₂ runtime; they do not include unrelated FID, MM-Distance,
+training, or local vLLM dependencies. No API credentials belong in this
+repository.
 
 ```bash
+python3.10 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -r requirements.txt
 python -m robosteer_api.task_index \
   --dataset-root /srv/robosteer/dataset \
   --output /srv/robosteer/task-index.sqlite3
-export ROBOOSTEER_CORE_ROOT=/srv/robosteer/evaluator
 export ROBOOSTEER_DATASET_ROOT=/srv/robosteer/dataset
 export ROBOOSTEER_TASK_INDEX=/srv/robosteer/task-index.sqlite3
 python -m robosteer_api.doctor
